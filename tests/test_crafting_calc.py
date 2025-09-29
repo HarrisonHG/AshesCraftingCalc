@@ -739,3 +739,49 @@ def test_load_recipes_invalid_material_quantity(tmp_path: Path):
     csv_path.write_text(csv_content)
     with pytest.raises(ValueError):
         crafting_calc.load_recipes(csv_path)
+
+
+def test_load_recipes_allows_missing_profession_for_non_craft(tmp_path: Path):
+    csv_content = textwrap.dedent(
+        """\
+        item,materials,method,source,profession,skill_tier,cost
+        Water,,purchase,Vendor,,,33
+        Clay,,raw,Clay Pit,,,0
+        """
+    )
+    csv_path = tmp_path / "missing_profession.csv"
+    csv_path.write_text(csv_content)
+
+    recipes = crafting_calc.load_recipes(csv_path)
+    water = recipes["Water"]
+    assert water["profession"] == "Unknown"
+    assert water["skill_tier"] == 0
+
+    clay = recipes["Clay"]
+    assert clay["profession"] == "Unknown"
+    assert clay["skill_tier"] == 0
+
+    bad_csv = textwrap.dedent(
+        """\
+        item,materials,method,source,profession,skill_tier,cost
+        Sword,1-Iron Ingot,craft,Forge,,3,100
+        """
+    )
+    bad_path = tmp_path / "missing_profession_craft.csv"
+    bad_path.write_text(bad_csv)
+    with pytest.raises(ValueError):
+        crafting_calc.load_recipes(bad_path)
+
+
+def test_load_recipes_validates_non_craft_skill_tier_range(tmp_path: Path):
+    csv_content = textwrap.dedent(
+        """\
+        item,materials,method,source,profession,skill_tier,cost
+        Water,,purchase,Vendor,,6,33
+        """
+    )
+    csv_path = tmp_path / "invalid_non_craft_tier.csv"
+    csv_path.write_text(csv_content)
+
+    with pytest.raises(ValueError):
+        crafting_calc.load_recipes(csv_path)
