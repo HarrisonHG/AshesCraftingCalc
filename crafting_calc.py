@@ -5,7 +5,7 @@ import argparse
 import csv
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterable
 
 DATA_FILE = Path(__file__).parent / "data" / "recipes.csv"
 
@@ -616,3 +616,90 @@ def print_report(item: str, recipes: dict[str, Recipe]):
     print(format_purchase_box(requirements, recipes))
     print()
     print(format_crafting_box(item, requirements, recipes))
+
+
+def find_matching_items(query: str, recipes: dict[str, Recipe]) -> list[str]:
+    """Return recipe names that contain ``query`` (case-insensitive)."""
+
+    trimmed = query.strip().lower()
+    if not trimmed:
+        return []
+    matches = [name for name in recipes if trimmed in name.lower()]
+    return sorted(matches)
+
+
+def format_match_list(matches: Iterable[str]) -> str:
+    lines = [f"- {match}" for match in matches]
+    return "\n".join(lines)
+
+
+def choose_item(query: str, recipes: dict[str, Recipe]) -> str:
+    """Return the recipe name that best matches ``query``.
+
+    Raises ``ValueError`` if there are zero or multiple matches.
+    """
+
+    matches = find_matching_items(query, recipes)
+    if not matches:
+        raise ValueError(f"No items found matching {query!r}.")
+    if len(matches) > 1:
+        match_lines = format_match_list(matches)
+        raise ValueError(
+            "Multiple items match "
+            f"{query!r}. Please clarify which item you want:\n{match_lines}"
+        )
+    return matches[0]
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="Ashes of Creation crafting helper")
+    parser.add_argument(
+        "item",
+        nargs="?",
+        help="Name of the item to craft (supports partial matches)",
+    )
+    parser.add_argument(
+        "--list",
+        action="store_true",
+        help="List all available items and exit",
+    )
+    parser.add_argument(
+        "--data",
+        type=Path,
+        default=DATA_FILE,
+        help="Path to the recipes CSV file (defaults to bundled data)",
+    )
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = build_parser()
+    args = parser.parse_args(argv)
+
+    try:
+        recipes = load_recipes(Path(args.data))
+    except Exception as exc:  # pragma: no cover - argparse prints the error
+        print(f"Failed to load recipe data: {exc}", file=sys.stderr)
+        return 2
+
+    if args.list:
+        for name in sorted(recipes):
+            print(name)
+        return 0
+
+    if not args.item:
+        parser.print_help()
+        return 1
+
+    try:
+        chosen_item = choose_item(args.item, recipes)
+    except ValueError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+
+    print_report(chosen_item, recipes)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -1,5 +1,6 @@
-import textwrap
+import csv
 import sys
+import textwrap
 from pathlib import Path
 
 sys.path.append(str(Path(__file__).resolve().parent.parent))
@@ -14,9 +15,11 @@ from crafting_calc import (
     build_gather_lines,
     build_gathered_ingredients_summary,
     build_purchase_lines,
+    choose_item,
     collect_required_skills,
     compute_purchase_total,
     compute_total_coin_cost,
+    find_matching_items,
     format_coin_amount,
     format_crafting_box,
     format_gather_box,
@@ -29,6 +32,7 @@ from crafting_calc import (
     get_profession_info,
     get_source_location,
     join_with_commas,
+    main,
     merge_purchase,
     merge_quantity,
     resolve_requirements,
@@ -137,6 +141,36 @@ def boots_requirements(sample_recipes: dict[str, Recipe]) -> dict[str, dict]:
     return resolve_requirements("Reinforced Boots", 1, sample_recipes)
 
 
+def write_recipe_csv(path: Path, recipes: dict[str, Recipe]) -> None:
+    fieldnames = (
+        "item",
+        "materials",
+        "method",
+        "source",
+        "profession",
+        "skill_tier",
+        "cost",
+    )
+    with path.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fieldnames)
+        writer.writeheader()
+        for recipe in recipes.values():
+            materials_tokens: list[str] = []
+            for material in recipe["materials"]:
+                materials_tokens.extend([str(material["quantity"]), material["item"]])
+            writer.writerow(
+                {
+                    "item": recipe["item"],
+                    "materials": "-".join(materials_tokens),
+                    "method": recipe["method"],
+                    "source": recipe["source"],
+                    "profession": recipe["profession"],
+                    "skill_tier": recipe["skill_tier"],
+                    "cost": recipe["cost"],
+                }
+            )
+
+
 def test_merge_purchase_conflicting_cost_raises():
     purchases: dict[str, dict[str, int]] = {}
     merge_purchase(purchases, "Thread", 2, 25)
@@ -198,6 +232,231 @@ def test_compute_purchase_total_boundary_cases():
 def test_compute_total_coin_cost_adds_components():
     assert compute_total_coin_cost(0, 0) == 0
     assert compute_total_coin_cost(75, 350) == 425
+
+
+def test_find_matching_items_supports_partial_search(sample_recipes: dict[str, Recipe]):
+    matches = find_matching_items("steel", sample_recipes)
+    assert matches == ["Steel Ingot"]
+
+
+def test_choose_item_multiple_matches_lists_options(sample_recipes: dict[str, Recipe]):
+    sample_recipes["Steel Sword"] = Recipe(
+        {
+            "item": "Steel Sword",
+            "method": "craft",
+            "source": "Forge",
+            "cost": 120,
+            "materials": [
+                {"item": "Steel Ingot", "quantity": 2},
+                {"item": "Leather", "quantity": 1},
+            ],
+            "profession": "Weaponsmith",
+            "skill_tier": 4,
+        }
+    )
+    with pytest.raises(ValueError) as excinfo:
+        choose_item("steel", sample_recipes)
+    message = str(excinfo.value)
+    assert "Multiple items match 'steel'" in message
+    assert "Steel Ingot" in message
+    assert "Steel Sword" in message
+
+
+def test_main_partial_match_selects_single_item(tmp_path: Path, capsys):
+    recipes = {
+        "Steel Sword": Recipe(
+            {
+                "item": "Steel Sword",
+                "method": "craft",
+                "source": "Forge",
+                "cost": 200,
+                "materials": [
+                    {"item": "Steel Ingot", "quantity": 2},
+                    {"item": "Thread", "quantity": 1},
+                ],
+                "profession": "Weaponsmith",
+                "skill_tier": 4,
+            }
+        ),
+        "Steel Ingot": Recipe(
+            {
+                "item": "Steel Ingot",
+                "method": "craft",
+                "source": "Forge",
+                "cost": 100,
+                "materials": [
+                    {"item": "Iron Ingot", "quantity": 2},
+                    {"item": "Coal", "quantity": 1},
+                ],
+                "profession": "Armorsmith",
+                "skill_tier": 4,
+            }
+        ),
+        "Iron Ingot": Recipe(
+            {
+                "item": "Iron Ingot",
+                "method": "craft",
+                "source": "Smelter",
+                "cost": 50,
+                "materials": [
+                    {"item": "Iron Ore", "quantity": 3},
+                ],
+                "profession": "Smelter",
+                "skill_tier": 2,
+            }
+        ),
+        "Iron Ore": Recipe(
+            {
+                "item": "Iron Ore",
+                "method": "raw",
+                "source": "Iron Vein",
+                "cost": 0,
+                "materials": [],
+                "profession": "Miner",
+                "skill_tier": 1,
+            }
+        ),
+        "Coal": Recipe(
+            {
+                "item": "Coal",
+                "method": "raw",
+                "source": "Coal Seam",
+                "cost": 0,
+                "materials": [],
+                "profession": "Miner",
+                "skill_tier": 1,
+            }
+        ),
+        "Thread": Recipe(
+            {
+                "item": "Thread",
+                "method": "purchase",
+                "source": "Market Stall",
+                "cost": 25,
+                "materials": [],
+                "profession": "Tailor",
+                "skill_tier": 1,
+            }
+        ),
+    }
+    csv_path = tmp_path / "recipes.csv"
+    write_recipe_csv(csv_path, recipes)
+    exit_code = main(["--data", str(csv_path), "swo"])
+    assert exit_code == 0
+    captured = capsys.readouterr()
+    assert "Steel Sword" in captured.out
+
+
+def test_main_multiple_matches_requests_clarification(tmp_path: Path, capsys):
+    recipes = {
+        "Steel Sword": Recipe(
+            {
+                "item": "Steel Sword",
+                "method": "craft",
+                "source": "Forge",
+                "cost": 200,
+                "materials": [
+                    {"item": "Steel Ingot", "quantity": 2},
+                    {"item": "Thread", "quantity": 1},
+                ],
+                "profession": "Weaponsmith",
+                "skill_tier": 4,
+            }
+        ),
+        "Steel Shield": Recipe(
+            {
+                "item": "Steel Shield",
+                "method": "craft",
+                "source": "Forge",
+                "cost": 220,
+                "materials": [
+                    {"item": "Steel Ingot", "quantity": 3},
+                    {"item": "Leather", "quantity": 1},
+                ],
+                "profession": "Armorsmith",
+                "skill_tier": 4,
+            }
+        ),
+        "Steel Ingot": Recipe(
+            {
+                "item": "Steel Ingot",
+                "method": "craft",
+                "source": "Forge",
+                "cost": 100,
+                "materials": [
+                    {"item": "Iron Ingot", "quantity": 2},
+                    {"item": "Coal", "quantity": 1},
+                ],
+                "profession": "Armorsmith",
+                "skill_tier": 4,
+            }
+        ),
+        "Iron Ingot": Recipe(
+            {
+                "item": "Iron Ingot",
+                "method": "craft",
+                "source": "Smelter",
+                "cost": 50,
+                "materials": [
+                    {"item": "Iron Ore", "quantity": 3},
+                ],
+                "profession": "Smelter",
+                "skill_tier": 2,
+            }
+        ),
+        "Iron Ore": Recipe(
+            {
+                "item": "Iron Ore",
+                "method": "raw",
+                "source": "Iron Vein",
+                "cost": 0,
+                "materials": [],
+                "profession": "Miner",
+                "skill_tier": 1,
+            }
+        ),
+        "Coal": Recipe(
+            {
+                "item": "Coal",
+                "method": "raw",
+                "source": "Coal Seam",
+                "cost": 0,
+                "materials": [],
+                "profession": "Miner",
+                "skill_tier": 1,
+            }
+        ),
+        "Thread": Recipe(
+            {
+                "item": "Thread",
+                "method": "purchase",
+                "source": "Market Stall",
+                "cost": 25,
+                "materials": [],
+                "profession": "Tailor",
+                "skill_tier": 1,
+            }
+        ),
+        "Leather": Recipe(
+            {
+                "item": "Leather",
+                "method": "raw",
+                "source": "Hunting Grounds",
+                "cost": 0,
+                "materials": [],
+                "profession": "Rancher",
+                "skill_tier": 2,
+            }
+        ),
+    }
+    csv_path = tmp_path / "recipes.csv"
+    write_recipe_csv(csv_path, recipes)
+    exit_code = main(["--data", str(csv_path), "steel"])
+    assert exit_code == 1
+    captured = capsys.readouterr()
+    assert "Multiple items match 'steel'" in captured.err
+    assert "- Steel Sword" in captured.err
+    assert "- Steel Shield" in captured.err
 
 
 def test_gather_items_for_skill_summary_collects_unique_items(boots_requirements):
