@@ -1,15 +1,27 @@
 item,materials,method,source,profession,skill_tier,cost
-Steel Longsword,4-Iron Ingot-1-Wooden Hilt-2-Leather Wrap,craft,Weaponsmithing Bench,Weaponsmithing,3,600
-Iron Ingot,3-Iron Nugget-1-Coal Chunk,craft,Smelting Furnace,Smelting,2,75
-Iron Nugget,,raw,Ironclad Caverns,Mining,2,0
-Coal Chunk,,raw,Ashen Mines,Mining,1,0
-Wooden Hilt,,purchase,Blacksmith Quartermaster,Carpentry,1,1250
-Leather Wrap,,purchase,Tannery Supplier,Tailoring,1,375
-Healing Salve,3-Herbal Extract-1-Glass Vial-1-Crystal Water,craft,Alchemist's Table,Alchemy,2,150
-Herbal Extract,,raw,Emerald Meadow,Herbalism,1,0
-Glass Vial,,purchase,Glassblower Vendor,Artificing,1,210
-Crystal Water,,purchase,Sacred Springs Attendant,Hydrology,1,125
-Arcane Staff,1-Oak Shaft-1-Focus Gem-2-Silk Grip,craft,Arcane Conduit,Arcane Crafting,4,800
-Oak Shaft,,raw,Whispering Timberland,Logging,2,0
-Focus Gem,,purchase,Gem Exchange,Jewelcrafting,3,4800
-Silk Grip,,purchase,Silkworks Merchant,Tailoring,2,440
+Water,,purchase,Equipment Vendor,,,33
+Cooking Oil,,purchase,Equipment Vendor,,,38
+Pepper,,purchase,Equipment Vendor,,,49
+Lettuce Seed,,purchase,Equipment Vendor,,,38
+Delicate Set of Tools,,purchase,Equipment Vendor,,,33
+Glowroot Grind,,purchase,Equipment Vendor,,,33
+Rotroot Pulp,,purchase,Equipment Vendor,,,148
+Final Touches,,purchase,Equipment Vendor,,,33
+Sanding Powder,,purchase,Equipment Vendor,,,33
+Smoldering Ash,,purchase,Equipment Vendor,,,33
+Binding Resin,,purchase,Equipment Vendor,,,33
+Metal Gauges,,purchase,Equipment Vendor,,,33
+Medium Gauges,,purchase,Equipment Vendor,,,33
+Leather Gauges,,purchase,Equipment Vendor,,,33
+Cloth Gauges,,purchase,Equipment Vendor,,,33
+Light Gauges,,purchase,Equipment Vendor,,,33
+Fleshloosen Oil,,purchase,Equipment Vendor,,,33
+Drawtwine Wax,,purchase,Equipment Vendor,,,33
+Oak Timber,1-Sanding Powder-1-Fuel-1-Oak Wood,craft,Lumber Milling,Lumbermilling,1,25
+Ash Timber,1-Sanding Powder-1-Fuel-1-Ash Wood,craft,Lumber Milling,Lumbermilling,1,25
+Eastern Hemlock Timber,1-Sanding Powder-1-Fuel-1-Eastern Hemlock Wood,craft,Lumber Milling,Lumbermilling,1,25
+Western Larch Timber,1-Sanding Powder-1-Fuel-1-Western Larch Wood,craft,Lumber Milling,Lumbermilling,1,25
+Daffodil Thread,1-Drawtwine Wax-1-Daffodil-1-Fuel,craft,Weaving,1,25
+Snowdrop Thread,1-Drawtwine Wax-1-Snowdrop-1-Fuel,craft,Weaving,1,25
+Grem Skin,1-Fleshloosen Oil-1-Grem Carcass-1-Fuel,craft,Tanning,6
+Animal Fat,1-Fleshloosen Oil-1-Grem Carcass-1-Fuel,craft,Tanning,6
