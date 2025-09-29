@@ -25,6 +25,7 @@ from crafting_calc import (
     format_gather_box,
     format_purchase_box,
     format_purchase_section,
+    format_report,
     format_raw_material_section,
     format_skill_summary,
     format_summary_section,
@@ -601,6 +602,13 @@ def test_format_purchase_box_wraps_lines(sample_recipes, boots_requirements):
         ["- 3 Threads (Market Stall) @ 25 copper each -> 75 copper"],
     )
     assert box == expected
+
+
+def test_format_report_contains_single_purchase_step(
+    sample_recipes: dict[str, Recipe]
+) -> None:
+    report = format_report("Reinforced Boots", sample_recipes)
+    assert report.count("2) Purchase Supplies") == 1
 
 
 def test_format_crafting_box_wraps_lines(sample_recipes, boots_requirements):
