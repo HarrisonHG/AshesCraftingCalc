@@ -37,6 +37,8 @@ def load_recipes(csv_path: Path) -> dict[str, Recipe]:
                 )
 
             for raw_row in reader:
+                if all((value is None or not str(value).strip()) for value in raw_row.values()):
+                    continue
                 item = raw_row.get("item", "").strip()
                 if not item:
                     raise ValueError("Encountered a row with an empty item name")
