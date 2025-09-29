@@ -344,122 +344,115 @@ def get_profession_info(
     return profession, tier_str
 
 
-def print_report(item: str, recipes: dict[str, Recipe]):
-    requirements = resolve_requirements(item, 1, recipes)
 
-    purchase_entries = requirements.get("purchase", {})
-    raw_entries = requirements.get("raw", {})
-    craft_cost = requirements.get("craft_cost", 0)
-    craft_counts = requirements.get("craft", {})
+def compute_purchase_total(purchase_entries: dict[str, dict[str, int]]) -> int:
+    """Return the total coin cost for all purchased items."""
 
-    purchase_total = sum(
-        info["quantity"] * info["unit_cost"] for info in purchase_entries.values()
-    )
-    total_coin_cost = purchase_total + craft_cost
+    total = 0
+    for info in purchase_entries.values():
+        total += info["quantity"] * info["unit_cost"]
+    return total
 
-    gathered_ingredients = [
-        format_quantity_name(quantity, name)
-        for name, quantity in sorted(raw_entries.items())
-    ]
-    gather_list = (
-        join_with_commas(gathered_ingredients) if gathered_ingredients else "None"
-    )
 
-    required_skills: dict[str, int] = {}
+def compute_total_coin_cost(purchase_total: int, craft_cost: int) -> int:
+    """Return the combined coin cost from purchases and crafting fees."""
 
-    def add_skill(name: str) -> None:
+    return purchase_total + craft_cost
+
+
+def gather_items_for_skill_summary(
+    item: str,
+    craft_counts: dict[str, int],
+    raw_entries: dict[str, int],
+    purchase_entries: dict[str, dict[str, int]],
+) -> set[str]:
+    """Collect all items that may contribute to the skill summary."""
+
+    related_items: set[str] = {item}
+    related_items.update(craft_counts.keys())
+    related_items.update(raw_entries.keys())
+    related_items.update(purchase_entries.keys())
+    return related_items
+
+
+def collect_required_skills(items: set[str], recipes: dict[str, Recipe]) -> dict[str, int]:
+    """Return the highest tier required per profession for ``items``."""
+
+    requirements: dict[str, int] = {}
+    for name in items:
         recipe = recipes.get(name)
         if not recipe:
-            return
+            continue
         profession = recipe.get("profession")
         tier = recipe.get("skill_tier")
         if not profession or not isinstance(tier, int) or tier <= 0:
-            return
-        required_skills[profession] = max(required_skills.get(profession, 0), tier)
+            continue
+        requirements[profession] = max(requirements.get(profession, 0), tier)
+    return requirements
 
-    add_skill(item)
-    for craft_name in craft_counts:
-        add_skill(craft_name)
-    for raw_name in raw_entries:
-        add_skill(raw_name)
-    for purchase_name in purchase_entries:
-        add_skill(purchase_name)
+
+def format_skill_summary(required_skills: dict[str, int]) -> str:
+    """Format a human-readable skill summary."""
 
     if required_skills:
-        skills_summary = ", ".join(
+        return ", ".join(
             f"{profession} {tier}" for profession, tier in sorted(required_skills.items())
         )
-    else:
-        skills_summary = "None"
+    return "None"
 
-    source_location = get_source_location(recipes, item, "Unknown source")
 
-    summary_rows = [
-        ("Item", item),
-        ("Source", source_location),
-        ("Crafting Fees", format_coin_amount(craft_cost)),
-        ("Gathered Ingredients", gather_list),
-        ("Skills", skills_summary),
-        ("Total Coin Cost", format_coin_amount(total_coin_cost)),
+def build_gathered_ingredients_summary(raw_entries: dict[str, int]) -> str:
+    """Summarize gathered ingredients for the report."""
+
+    gathered = [
+        format_quantity_name(quantity, name)
+        for name, quantity in sorted(raw_entries.items())
     ]
-    print(build_table(("Summary", "Value"), summary_rows))
+    if not gathered:
+        return "None"
+    return join_with_commas(gathered)
 
-    raw_rows: list[tuple[str, ...]] = []
-    for name, quantity in sorted(raw_entries.items()):
+
+def build_gather_lines(raw_entries: dict[str, int], recipes: dict[str, Recipe]) -> list[str]:
+    """Return lines describing required gathering steps."""
+
+    lines = []
+    for name, qty in sorted(raw_entries.items()):
         location = get_source_location(recipes, name)
-        profession, tier = get_profession_info(recipes, name)
-        raw_rows.append((name, str(quantity), location, profession, tier))
-    if not raw_rows:
-        raw_rows = [("None", "-", "No raw materials required.", "-", "-")]
-    print()
-    print(
-        build_table(
-            ("Raw Material", "Quantity", "Location", "Profession", "Skill Tier"),
-            raw_rows,
-        )
-    )
+        lines.append(f"- {format_quantity_name(qty, name)} ({location})")
+    if not lines:
+        lines.append("- No gathering required")
+    return lines
 
-    purchase_rows: list[tuple[str, ...]] = []
+
+def build_purchase_lines(
+    purchase_entries: dict[str, dict[str, int]], recipes: dict[str, Recipe]
+) -> list[str]:
+    """Return lines describing required purchase steps."""
+
+    lines = []
     for name, info in sorted(purchase_entries.items()):
         quantity = info["quantity"]
-        unit_cost = info["unit_cost"]
-        total_cost = quantity * unit_cost
+        unit_cost = format_coin_amount(info["unit_cost"])
+        total_cost = format_coin_amount(quantity * info["unit_cost"])
         location = get_source_location(recipes, name, "Unknown source")
-        profession, tier = get_profession_info(recipes, name)
-        purchase_rows.append(
-            (
-                name,
-                str(quantity),
-                location,
-                profession,
-                tier,
-                format_coin_amount(unit_cost),
-                format_coin_amount(total_cost),
-            )
+        lines.append(
+            f"- {format_quantity_name(quantity, name)} ({location}) "
+            f"@ {unit_cost} each -> {total_cost}"
         )
-    if not purchase_rows:
-        purchase_rows = [
-            ("None", "-", "No purchase locations.", "-", "-", "-", "No purchases required."),
-        ]
-    print()
-    print(
-        build_table(
-            (
-                "Purchase Item",
-                "Quantity",
-                "Location",
-                "Profession",
-                "Skill Tier",
-                "Unit Cost",
-                "Total Cost",
-            ),
-            purchase_rows,
-        )
-    )
+    if not lines:
+        lines.append("- No purchases required")
+    return lines
 
-    craft_order = build_crafting_order(item, craft_counts, recipes)
-    craft_lines: list[str] = []
-    for craft_item in craft_order:
+
+def build_craft_lines(
+    item: str, craft_counts: dict[str, int], recipes: dict[str, Recipe]
+) -> list[str]:
+    """Return numbered lines describing crafting steps."""
+
+    order = build_crafting_order(item, craft_counts, recipes)
+    descriptions: list[str] = []
+    for craft_item in order:
         recipe = recipes.get(craft_item)
         if not recipe or recipe["method"] != "craft":
             continue
@@ -473,91 +466,153 @@ def print_report(item: str, recipes: dict[str, Recipe]):
         fee = recipe["cost"] * quantity
         if fee:
             materials_used.append(f"{format_coin_amount(fee)} fee")
-        location = get_source_location(recipes, craft_item, "Unknown crafting station")
-        description = (
-            f"Craft {format_quantity_name(quantity, craft_item)} at {location} using "
+        location = get_source_location(
+            recipes, craft_item, "Unknown crafting station"
+        )
+        descriptions.append(
+            "Craft "
+            f"{format_quantity_name(quantity, craft_item)} at {location} using "
             f"{join_with_commas(materials_used)}"
         )
-        craft_lines.append(description)
+    if descriptions:
+        return [f"{index + 1}. {line}" for index, line in enumerate(descriptions)]
+    return ["- No crafting steps required"]
 
-    gather_lines = []
-    for name, qty in sorted(raw_entries.items()):
+
+def format_summary_section(
+    item: str, requirements: dict[str, Any], recipes: dict[str, Recipe]
+) -> str:
+    """Return the formatted summary table for ``item``."""
+
+    purchase_entries = requirements.get("purchase", {})
+    raw_entries = requirements.get("raw", {})
+    craft_cost = requirements.get("craft_cost", 0)
+    craft_counts = requirements.get("craft", {})
+
+    purchase_total = compute_purchase_total(purchase_entries)
+    total_coin_cost = compute_total_coin_cost(purchase_total, craft_cost)
+    gather_list = build_gathered_ingredients_summary(raw_entries)
+    related_items = gather_items_for_skill_summary(
+        item, craft_counts, raw_entries, purchase_entries
+    )
+    required_skills = collect_required_skills(related_items, recipes)
+    skills_summary = format_skill_summary(required_skills)
+    source_location = get_source_location(recipes, item, "Unknown source")
+
+    summary_rows = [
+        ("Item", item),
+        ("Source", source_location),
+        ("Crafting Fees", format_coin_amount(craft_cost)),
+        ("Gathered Ingredients", gather_list),
+        ("Skills", skills_summary),
+        ("Total Coin Cost", format_coin_amount(total_coin_cost)),
+    ]
+    return build_table(("Summary", "Value"), summary_rows)
+
+
+def format_raw_material_section(
+    requirements: dict[str, Any], recipes: dict[str, Recipe]
+) -> str:
+    """Return the formatted raw material table."""
+
+    raw_entries = requirements.get("raw", {})
+    rows: list[tuple[str, ...]] = []
+    for name, quantity in sorted(raw_entries.items()):
         location = get_source_location(recipes, name)
-        gather_lines.append(
-            f"- {format_quantity_name(qty, name)} ({location})"
-        )
-    if not gather_lines:
-        gather_lines = ["- No gathering required"]
+        profession, tier = get_profession_info(recipes, name)
+        rows.append((name, str(quantity), location, profession, tier))
+    if not rows:
+        rows = [("None", "-", "No raw materials required.", "-", "-")]
+    return build_table(
+        ("Raw Material", "Quantity", "Location", "Profession", "Skill Tier"),
+        rows,
+    )
 
-    purchase_lines = []
+
+def format_purchase_section(
+    requirements: dict[str, Any], recipes: dict[str, Recipe]
+) -> str:
+    """Return the formatted purchase table."""
+
+    purchase_entries = requirements.get("purchase", {})
+    rows: list[tuple[str, ...]] = []
     for name, info in sorted(purchase_entries.items()):
         quantity = info["quantity"]
-        unit_cost = format_coin_amount(info["unit_cost"])
-        total_cost = format_coin_amount(info["quantity"] * info["unit_cost"])
+        unit_cost = info["unit_cost"]
+        total_cost = quantity * unit_cost
         location = get_source_location(recipes, name, "Unknown source")
-        purchase_lines.append(
-            f"- {format_quantity_name(quantity, name)} ({location}) @ {unit_cost} each -> {total_cost}"
+        profession, tier = get_profession_info(recipes, name)
+        rows.append(
+            (
+                name,
+                str(quantity),
+                location,
+                profession,
+                tier,
+                format_coin_amount(unit_cost),
+                format_coin_amount(total_cost),
+            )
         )
-    if not purchase_lines:
-        purchase_lines = ["- No purchases required"]
-
-    if craft_lines:
-        craft_lines = [f"{index + 1}. {line}" for index, line in enumerate(craft_lines)]
-    else:
-        craft_lines = ["- No crafting steps required"]
-
-    print()
-    print(build_box("1) Gather Raw Materials", gather_lines))
-    print()
-    print(build_box("2) Purchase Supplies", purchase_lines))
-    print()
-    print(build_box("3) Crafting Order", craft_lines))
-
-
-def parse_args(argv):
-    parser = argparse.ArgumentParser(
-        description="Calculate required materials and costs for crafting items."
+    if not rows:
+        rows = [
+            (
+                "None",
+                "-",
+                "No purchase locations.",
+                "-",
+                "-",
+                "-",
+                "No purchases required.",
+            ),
+        ]
+    return build_table(
+        (
+            "Purchase Item",
+            "Quantity",
+            "Location",
+            "Profession",
+            "Skill Tier",
+            "Unit Cost",
+            "Total Cost",
+        ),
+        rows,
     )
-    parser.add_argument("item", nargs="?", help="Name of the item to craft")
-    parser.add_argument(
-        "--list",
-        action="store_true",
-        help="List all available items and exit",
-    )
-    parser.add_argument(
-        "--data",
-        type=Path,
-        default=DATA_FILE,
-        help="Path to the recipes CSV file (defaults to repository data file)",
-    )
-    return parser.parse_args(argv)
 
 
-def main(argv=None):
-    args = parse_args(argv or sys.argv[1:])
-    recipes = load_recipes(args.data)
+def format_gather_box(requirements: dict[str, Any], recipes: dict[str, Recipe]) -> str:
+    """Return the gather instructions box."""
 
-    if args.list:
-        print("Available items:")
-        for item_name in sorted(recipes):
-            print(f"  - {item_name}")
-        return 0
-
-    if not args.item:
-        print("Error: you must provide an item name. Use --list to see available items.")
-        return 1
-
-    item_key = args.item.strip()
-    if item_key not in recipes:
-        print(
-            f"No recipe found for '{item_key}'. Use --list to see available items, "
-            "or gather it directly."
-        )
-        return 1
-
-    print_report(item_key, recipes)
-    return 0
+    lines = build_gather_lines(requirements.get("raw", {}), recipes)
+    return build_box("1) Gather Raw Materials", lines)
 
 
-if __name__ == "__main__":
-    raise SystemExit(main())
+def format_purchase_box(requirements: dict[str, Any], recipes: dict[str, Recipe]) -> str:
+    """Return the purchase instructions box."""
+
+    lines = build_purchase_lines(requirements.get("purchase", {}), recipes)
+    return build_box("2) Purchase Supplies", lines)
+
+
+def format_crafting_box(
+    item: str, requirements: dict[str, Any], recipes: dict[str, Recipe]
+) -> str:
+    """Return the crafting order box."""
+
+    lines = build_craft_lines(item, requirements.get("craft", {}), recipes)
+    return build_box("3) Crafting Order", lines)
+
+
+def print_report(item: str, recipes: dict[str, Recipe]):
+    requirements = resolve_requirements(item, 1, recipes)
+
+    print(format_summary_section(item, requirements, recipes))
+    print()
+    print(format_raw_material_section(requirements, recipes))
+    print()
+    print(format_purchase_section(requirements, recipes))
+    print()
+    print(format_gather_box(requirements, recipes))
+    print()
+    print(format_purchase_box(requirements, recipes))
+    print()
+    print(format_crafting_box(item, requirements, recipes))
