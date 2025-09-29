@@ -602,20 +602,24 @@ def format_crafting_box(
     return build_box("3) Crafting Order", lines)
 
 
-def print_report(item: str, recipes: dict[str, Recipe]):
+def format_report(item: str, recipes: dict[str, Recipe]) -> str:
+    """Return the full formatted crafting report for ``item``."""
+
     requirements = resolve_requirements(item, 1, recipes)
 
-    print(format_summary_section(item, requirements, recipes))
-    print()
-    print(format_raw_material_section(requirements, recipes))
-    print()
-    print(format_purchase_section(requirements, recipes))
-    print()
-    print(format_gather_box(requirements, recipes))
-    print()
-    print(format_purchase_box(requirements, recipes))
-    print()
-    print(format_crafting_box(item, requirements, recipes))
+    sections = [
+        format_summary_section(item, requirements, recipes),
+        format_raw_material_section(requirements, recipes),
+        format_purchase_section(requirements, recipes),
+        format_gather_box(requirements, recipes),
+        format_purchase_box(requirements, recipes),
+        format_crafting_box(item, requirements, recipes),
+    ]
+    return "\n\n".join(sections)
+
+
+def print_report(item: str, recipes: dict[str, Recipe]):
+    print(format_report(item, recipes))
 
 
 def find_matching_items(query: str, recipes: dict[str, Recipe]) -> list[str]:
