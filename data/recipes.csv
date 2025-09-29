@@ -1,0 +1,13 @@
+item,materials,source,cost
+Steel Longsword,4-Iron Ingot-1-Wooden Hilt-2-Leather Wrap,craft,600
+Iron Ingot,3-Iron Nugget-1-Coal Chunk,craft,75
+Wooden Hilt,,purchase,1250
+Leather Wrap,,purchase,375
+Healing Salve,3-Herbal Extract-1-Glass Vial-1-Crystal Water,craft,150
+Herbal Extract,,raw,0
+Glass Vial,,purchase,210
+Crystal Water,,purchase,125
+Arcane Staff,1-Oak Shaft-1-Focus Gem-2-Silk Grip,craft,800
+Oak Shaft,,raw,0
+Focus Gem,,purchase,4800
+Silk Grip,,purchase,440
