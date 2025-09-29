@@ -21,7 +21,15 @@ def load_recipes(csv_path: Path) -> dict[str, Recipe]:
     try:
         with csv_path.open(newline="", encoding="utf-8") as handle:
             reader = csv.DictReader(handle)
-            required_fields = {"item", "materials", "source", "cost"}
+            required_fields = {
+                "item",
+                "materials",
+                "method",
+                "source",
+                "profession",
+                "skill_tier",
+                "cost",
+            }
             missing_fields = required_fields - set(reader.fieldnames or [])
             if missing_fields:
                 raise ValueError(
@@ -33,10 +41,33 @@ def load_recipes(csv_path: Path) -> dict[str, Recipe]:
                 if not item:
                     raise ValueError("Encountered a row with an empty item name")
 
-                source = raw_row.get("source", "").strip().lower()
-                if source not in {"craft", "purchase", "raw"}:
+                method = raw_row.get("method", "").strip().lower()
+                if method not in {"craft", "purchase", "raw"}:
                     raise ValueError(
-                        f"Unknown source '{raw_row.get('source')}' for item {item!r}"
+                        f"Unknown method '{raw_row.get('method')}' for item {item!r}"
+                    )
+
+                source_location = raw_row.get("source", "").strip()
+                if not source_location:
+                    raise ValueError(
+                        f"Source location missing for item {item!r}."
+                    )
+
+                profession = raw_row.get("profession", "").strip()
+                if not profession:
+                    raise ValueError(
+                        f"Profession missing for item {item!r}."
+                    )
+
+                try:
+                    skill_tier = int(raw_row.get("skill_tier", "0"))
+                except ValueError as exc:
+                    raise ValueError(
+                        f"Invalid skill tier '{raw_row.get('skill_tier')}' for item {item!r}"
+                    ) from exc
+                if not 1 <= skill_tier <= 5:
+                    raise ValueError(
+                        f"Skill tier for item {item!r} must be between 1 and 5"
                     )
 
                 try:
@@ -71,7 +102,7 @@ def load_recipes(csv_path: Path) -> dict[str, Recipe]:
                             )
                         materials.append({"item": name, "quantity": quantity})
 
-                if source == "craft" and not materials:
+                if method == "craft" and not materials:
                     raise ValueError(
                         f"Crafted item {item!r} must list its component materials"
                     )
@@ -79,9 +110,12 @@ def load_recipes(csv_path: Path) -> dict[str, Recipe]:
                 recipes[item] = Recipe(
                     {
                         "item": item,
-                        "source": source,
+                        "method": method,
+                        "source": source_location,
                         "cost": cost,
                         "materials": materials,
+                        "profession": profession,
+                        "skill_tier": skill_tier,
                     }
                 )
     except FileNotFoundError as exc:
@@ -132,10 +166,10 @@ def resolve_requirements(
             "craft": {},
         }
 
-    source = recipe["source"]
+    method = recipe["method"]
     cost = recipe["cost"]
 
-    if source == "purchase":
+    if method == "purchase":
         return {
             "purchase": {item: {"quantity": quantity, "unit_cost": cost}},
             "raw": {},
@@ -143,7 +177,7 @@ def resolve_requirements(
             "craft": {},
         }
 
-    if source == "raw":
+    if method == "raw":
         return {
             "purchase": {},
             "raw": {item: quantity},
@@ -151,8 +185,8 @@ def resolve_requirements(
             "craft": {},
         }
 
-    if source != "craft":
-        raise ValueError(f"Unsupported source '{source}' for item {item!r}")
+    if method != "craft":
+        raise ValueError(f"Unsupported method '{method}' for item {item!r}")
 
     subtotal = {
         "purchase": {},
@@ -247,7 +281,7 @@ def build_crafting_order(
             raise ValueError(f"Detected crafting cycle when ordering steps: {cycle}")
         active.add(name)
         recipe = recipes.get(name)
-        if recipe and recipe["source"] == "craft":
+        if recipe and recipe["method"] == "craft":
             for material in recipe["materials"]:
                 child_name = material["item"]
                 if child_name in craft_counts:
@@ -283,6 +317,33 @@ def format_quantity_name(quantity: int, name: str) -> str:
     return f"{quantity} {name}s"
 
 
+def get_source_location(
+    recipes: dict[str, Recipe], item: str, default: str = "Unknown location"
+) -> str:
+    recipe = recipes.get(item)
+    if not recipe:
+        return default
+    location = recipe.get("source")
+    if not location:
+        return default
+    return location
+
+
+def get_profession_info(
+    recipes: dict[str, Recipe], item: str, default_profession: str = "Unknown"
+) -> tuple[str, str]:
+    recipe = recipes.get(item)
+    if not recipe:
+        return default_profession, "-"
+    profession = recipe.get("profession") or default_profession
+    tier = recipe.get("skill_tier")
+    if isinstance(tier, int) and tier > 0:
+        tier_str = str(tier)
+    else:
+        tier_str = "-"
+    return profession, tier_str
+
+
 def print_report(item: str, recipes: dict[str, Recipe]):
     requirements = resolve_requirements(item, 1, recipes)
 
@@ -294,50 +355,105 @@ def print_report(item: str, recipes: dict[str, Recipe]):
     purchase_total = sum(
         info["quantity"] * info["unit_cost"] for info in purchase_entries.values()
     )
-    overall_total = purchase_total + craft_cost
+    total_coin_cost = purchase_total + craft_cost
 
-    purchase_ingredients = [
-        format_quantity_name(info["quantity"], name)
-        for name, info in sorted(purchase_entries.items())
+    gathered_ingredients = [
+        format_quantity_name(quantity, name)
+        for name, quantity in sorted(raw_entries.items())
     ]
-    purchase_list = join_with_commas(purchase_ingredients) if purchase_ingredients else "None"
+    gather_list = (
+        join_with_commas(gathered_ingredients) if gathered_ingredients else "None"
+    )
+
+    required_skills: dict[str, int] = {}
+
+    def add_skill(name: str) -> None:
+        recipe = recipes.get(name)
+        if not recipe:
+            return
+        profession = recipe.get("profession")
+        tier = recipe.get("skill_tier")
+        if not profession or not isinstance(tier, int) or tier <= 0:
+            return
+        required_skills[profession] = max(required_skills.get(profession, 0), tier)
+
+    add_skill(item)
+    for craft_name in craft_counts:
+        add_skill(craft_name)
+    for raw_name in raw_entries:
+        add_skill(raw_name)
+    for purchase_name in purchase_entries:
+        add_skill(purchase_name)
+
+    if required_skills:
+        skills_summary = ", ".join(
+            f"{profession} {tier}" for profession, tier in sorted(required_skills.items())
+        )
+    else:
+        skills_summary = "None"
+
+    source_location = get_source_location(recipes, item, "Unknown source")
 
     summary_rows = [
         ("Item", item),
+        ("Source", source_location),
         ("Crafting Fees", format_coin_amount(craft_cost)),
-        ("Purchase Cost", format_coin_amount(purchase_total)),
-        ("Purchase Ingredients", purchase_list),
-        ("Overall Total", format_coin_amount(overall_total)),
+        ("Gathered Ingredients", gather_list),
+        ("Skills", skills_summary),
+        ("Total Coin Cost", format_coin_amount(total_coin_cost)),
     ]
     print(build_table(("Summary", "Value"), summary_rows))
 
-    raw_rows: list[tuple[str, ...]] = [
-        (name, str(quantity)) for name, quantity in sorted(raw_entries.items())
-    ]
+    raw_rows: list[tuple[str, ...]] = []
+    for name, quantity in sorted(raw_entries.items()):
+        location = get_source_location(recipes, name)
+        profession, tier = get_profession_info(recipes, name)
+        raw_rows.append((name, str(quantity), location, profession, tier))
     if not raw_rows:
-        raw_rows = [("None", "No raw materials required.")]
+        raw_rows = [("None", "-", "No raw materials required.", "-", "-")]
     print()
-    print(build_table(("Raw Material", "Quantity"), raw_rows))
+    print(
+        build_table(
+            ("Raw Material", "Quantity", "Location", "Profession", "Skill Tier"),
+            raw_rows,
+        )
+    )
 
     purchase_rows: list[tuple[str, ...]] = []
     for name, info in sorted(purchase_entries.items()):
         quantity = info["quantity"]
         unit_cost = info["unit_cost"]
         total_cost = quantity * unit_cost
+        location = get_source_location(recipes, name, "Unknown source")
+        profession, tier = get_profession_info(recipes, name)
         purchase_rows.append(
             (
                 name,
                 str(quantity),
+                location,
+                profession,
+                tier,
                 format_coin_amount(unit_cost),
                 format_coin_amount(total_cost),
             )
         )
     if not purchase_rows:
-        purchase_rows = [("None", "-", "-", "No purchases required.")]
+        purchase_rows = [
+            ("None", "-", "No purchase locations.", "-", "-", "-", "No purchases required."),
+        ]
     print()
     print(
         build_table(
-            ("Purchase Item", "Quantity", "Unit Cost", "Total Cost"), purchase_rows
+            (
+                "Purchase Item",
+                "Quantity",
+                "Location",
+                "Profession",
+                "Skill Tier",
+                "Unit Cost",
+                "Total Cost",
+            ),
+            purchase_rows,
         )
     )
 
@@ -345,7 +461,7 @@ def print_report(item: str, recipes: dict[str, Recipe]):
     craft_lines: list[str] = []
     for craft_item in craft_order:
         recipe = recipes.get(craft_item)
-        if not recipe or recipe["source"] != "craft":
+        if not recipe or recipe["method"] != "craft":
             continue
         quantity = craft_counts[craft_item]
         materials_used: list[str] = []
@@ -357,15 +473,19 @@ def print_report(item: str, recipes: dict[str, Recipe]):
         fee = recipe["cost"] * quantity
         if fee:
             materials_used.append(f"{format_coin_amount(fee)} fee")
+        location = get_source_location(recipes, craft_item, "Unknown crafting station")
         description = (
-            f"Craft {format_quantity_name(quantity, craft_item)} using "
+            f"Craft {format_quantity_name(quantity, craft_item)} at {location} using "
             f"{join_with_commas(materials_used)}"
         )
         craft_lines.append(description)
 
-    gather_lines = [
-        f"- {format_quantity_name(qty, name)}" for name, qty in sorted(raw_entries.items())
-    ]
+    gather_lines = []
+    for name, qty in sorted(raw_entries.items()):
+        location = get_source_location(recipes, name)
+        gather_lines.append(
+            f"- {format_quantity_name(qty, name)} ({location})"
+        )
     if not gather_lines:
         gather_lines = ["- No gathering required"]
 
@@ -374,8 +494,9 @@ def print_report(item: str, recipes: dict[str, Recipe]):
         quantity = info["quantity"]
         unit_cost = format_coin_amount(info["unit_cost"])
         total_cost = format_coin_amount(info["quantity"] * info["unit_cost"])
+        location = get_source_location(recipes, name, "Unknown source")
         purchase_lines.append(
-            f"- {format_quantity_name(quantity, name)} @ {unit_cost} each -> {total_cost}"
+            f"- {format_quantity_name(quantity, name)} ({location}) @ {unit_cost} each -> {total_cost}"
         )
     if not purchase_lines:
         purchase_lines = ["- No purchases required"]
