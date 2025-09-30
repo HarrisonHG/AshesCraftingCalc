@@ -55,22 +55,37 @@ def load_recipes(csv_path: Path) -> dict[str, Recipe]:
                         f"Source location missing for item {item!r}."
                     )
 
-                profession = raw_row.get("profession", "").strip()
-                if not profession:
-                    raise ValueError(
-                        f"Profession missing for item {item!r}."
-                    )
+                profession_raw = (raw_row.get("profession") or "").strip()
+                if method == "craft":
+                    if not profession_raw:
+                        raise ValueError(
+                            f"Profession missing for item {item!r}."
+                        )
+                    profession = profession_raw
+                else:
+                    profession = profession_raw or "Unknown"
 
-                try:
-                    skill_tier = int(raw_row.get("skill_tier", "0"))
-                except ValueError as exc:
-                    raise ValueError(
-                        f"Invalid skill tier '{raw_row.get('skill_tier')}' for item {item!r}"
-                    ) from exc
-                if not 1 <= skill_tier <= 5:
-                    raise ValueError(
-                        f"Skill tier for item {item!r} must be between 1 and 5"
-                    )
+                skill_tier_token = (raw_row.get("skill_tier") or "").strip()
+                if skill_tier_token:
+                    try:
+                        skill_tier = int(skill_tier_token)
+                    except ValueError as exc:
+                        raise ValueError(
+                            f"Invalid skill tier '{raw_row.get('skill_tier')}' for item {item!r}"
+                        ) from exc
+                else:
+                    skill_tier = 0
+
+                if method == "craft":
+                    if not 1 <= skill_tier <= 5:
+                        raise ValueError(
+                            f"Skill tier for item {item!r} must be between 1 and 5"
+                        )
+                else:
+                    if skill_tier < 0 or skill_tier > 5:
+                        raise ValueError(
+                            f"Skill tier for item {item!r} must be between 0 and 5"
+                        )
 
                 try:
                     cost = int(raw_row.get("cost", "0"))
