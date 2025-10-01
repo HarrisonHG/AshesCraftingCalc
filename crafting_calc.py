@@ -10,6 +10,93 @@ from typing import Any, Iterable
 DATA_FILE = Path(__file__).parent / "data" / "recipes.csv"
 
 
+def _parse_output_entries(raw_value: str) -> list[tuple[int, str]]:
+    """Parse the CSV item column into output quantity/name pairs."""
+
+    stripped = raw_value.strip()
+    if not stripped:
+        raise ValueError("Encountered a row with an empty item name")
+
+    has_dash = "-" in raw_value
+    tokens = [chunk.strip() for chunk in raw_value.split("-") if chunk.strip()]
+
+    if not has_dash:
+        return [(1, stripped)]
+
+    if len(tokens) < 2 or len(tokens) % 2 != 0:
+        raise ValueError(
+            "Item column must contain quantity/item pairs (missing a value?)"
+        )
+
+    outputs: list[tuple[int, str]] = []
+    for qty_token, name in zip(tokens[0::2], tokens[1::2]):
+        if not name:
+            raise ValueError(
+                f"Item name missing for quantity '{qty_token}' in item column"
+            )
+        try:
+            quantity = int(qty_token)
+        except ValueError as exc:
+            raise ValueError(
+                f"Invalid quantity '{qty_token}' in item column for {name!r}"
+            ) from exc
+        if quantity <= 0:
+            raise ValueError(
+                f"Quantity must be positive for crafted output {name!r}"
+            )
+        outputs.append((quantity, name))
+    return outputs
+
+
+def _parse_materials_field(raw_value: str, item_label: str) -> list[dict[str, Any]]:
+    """Parse the CSV materials column into dictionaries."""
+
+    stripped = raw_value.strip()
+    if not stripped:
+        return []
+
+    has_dash = "-" in raw_value
+    tokens = [chunk.strip() for chunk in raw_value.split("-") if chunk.strip()]
+
+    if not has_dash:
+        return [{"item": stripped, "quantity": 1}]
+
+    if len(tokens) < 2 or len(tokens) % 2 != 0:
+        raise ValueError(
+            f"Materials field for {item_label!r} must contain pairs of quantity and item"
+        )
+
+    materials: list[dict[str, Any]] = []
+    for qty_token, name in zip(tokens[0::2], tokens[1::2]):
+        if not name:
+            raise ValueError(
+                f"Material name missing for quantity '{qty_token}' in {item_label!r}"
+            )
+        try:
+            quantity = int(qty_token)
+        except ValueError as exc:
+            raise ValueError(
+                f"Invalid quantity '{qty_token}' in materials for {item_label!r}"
+            ) from exc
+        if quantity <= 0:
+            raise ValueError(
+                f"Quantity must be positive for material {name!r} in {item_label!r}"
+            )
+        materials.append({"item": name, "quantity": quantity})
+    return materials
+
+
+def _get_output_quantity(recipe: "Recipe") -> int:
+    """Return the quantity produced per craft attempt for ``recipe``."""
+
+    value = recipe.get("output_quantity", 1)
+    try:
+        quantity = int(value)
+    except (TypeError, ValueError):
+        return 1
+    return quantity if quantity > 0 else 1
+
+
 class Recipe(dict):
     """Typed recipe mapping for static type-checkers."""
 
@@ -39,27 +126,44 @@ def load_recipes(csv_path: Path) -> dict[str, Recipe]:
             for raw_row in reader:
                 if all((value is None or not str(value).strip()) for value in raw_row.values()):
                     continue
-                item = raw_row.get("item", "").strip()
-                if not item:
-                    raise ValueError("Encountered a row with an empty item name")
+                item_field_raw = raw_row.get("item") or ""
+                outputs = _parse_output_entries(item_field_raw)
+                output_names = [name for _, name in outputs]
+                duplicates: set[str] = set()
+                seen_names: set[str] = set()
+                for name in output_names:
+                    if name in seen_names:
+                        duplicates.add(name)
+                    seen_names.add(name)
+                if duplicates:
+                    duplicate_list = ", ".join(sorted(duplicates))
+                    raise ValueError(
+                        f"Duplicate crafted output name(s) {duplicate_list} in item column"
+                    )
+
+                display_label = (
+                    output_names[0]
+                    if len(output_names) == 1
+                    else ", ".join(output_names)
+                )
 
                 method = raw_row.get("method", "").strip().lower()
                 if method not in {"craft", "purchase", "raw"}:
                     raise ValueError(
-                        f"Unknown method '{raw_row.get('method')}' for item {item!r}"
+                        f"Unknown method '{raw_row.get('method')}' for item(s) {display_label!r}"
                     )
 
                 source_location = raw_row.get("source", "").strip()
                 if not source_location:
                     raise ValueError(
-                        f"Source location missing for item {item!r}."
+                        f"Source location missing for item(s) {display_label!r}."
                     )
 
                 profession_raw = (raw_row.get("profession") or "").strip()
                 if method == "craft":
                     if not profession_raw:
                         raise ValueError(
-                            f"Profession missing for item {item!r}."
+                            f"Profession missing for item(s) {display_label!r}."
                         )
                     profession = profession_raw
                 else:
@@ -71,7 +175,7 @@ def load_recipes(csv_path: Path) -> dict[str, Recipe]:
                         skill_tier = int(skill_tier_token)
                     except ValueError as exc:
                         raise ValueError(
-                            f"Invalid skill tier '{raw_row.get('skill_tier')}' for item {item!r}"
+                            f"Invalid skill tier '{raw_row.get('skill_tier')}' for item(s) {display_label!r}"
                         ) from exc
                 else:
                     skill_tier = 0
@@ -79,62 +183,54 @@ def load_recipes(csv_path: Path) -> dict[str, Recipe]:
                 if method == "craft":
                     if not 1 <= skill_tier <= 5:
                         raise ValueError(
-                            f"Skill tier for item {item!r} must be between 1 and 5"
+                            f"Skill tier for item(s) {display_label!r} must be between 1 and 5"
                         )
                 else:
                     if skill_tier < 0 or skill_tier > 5:
                         raise ValueError(
-                            f"Skill tier for item {item!r} must be between 0 and 5"
+                            f"Skill tier for item(s) {display_label!r} must be between 0 and 5"
                         )
 
                 try:
                     cost = int(raw_row.get("cost", "0"))
                 except ValueError as exc:
                     raise ValueError(
-                        f"Invalid cost '{raw_row.get('cost')}' for item {item!r}"
+                        f"Invalid cost '{raw_row.get('cost')}' for item(s) {display_label!r}"
                     ) from exc
 
-                materials_field = (raw_row.get("materials") or "").strip()
-                materials: list[dict[str, Any]] = []
-                if materials_field:
-                    tokens = [chunk.strip() for chunk in materials_field.split("-") if chunk.strip()]
-                    if len(tokens) % 2 != 0:
-                        raise ValueError(
-                            f"Materials field for {item!r} must contain pairs of quantity and item"
-                        )
-                    for qty_token, name in zip(tokens[0::2], tokens[1::2]):
-                        try:
-                            quantity = int(qty_token)
-                        except ValueError as exc:
-                            raise ValueError(
-                                f"Invalid quantity '{qty_token}' in materials for {item!r}"
-                            ) from exc
-                        if quantity <= 0:
-                            raise ValueError(
-                                f"Quantity must be positive for material {name!r} in {item!r}"
-                            )
-                        if not name:
-                            raise ValueError(
-                                f"Material name missing for quantity '{qty_token}' in {item!r}"
-                            )
-                        materials.append({"item": name, "quantity": quantity})
+                materials_field_raw = raw_row.get("materials") or ""
+                materials = _parse_materials_field(
+                    materials_field_raw, display_label
+                )
 
                 if method == "craft" and not materials:
                     raise ValueError(
-                        f"Crafted item {item!r} must list its component materials"
+                        f"Crafted item(s) {display_label!r} must list component materials"
                     )
 
-                recipes[item] = Recipe(
-                    {
-                        "item": item,
-                        "method": method,
-                        "source": source_location,
-                        "cost": cost,
-                        "materials": materials,
-                        "profession": profession,
-                        "skill_tier": skill_tier,
-                    }
-                )
+                outputs_list = [
+                    {"item": name, "quantity": quantity} for quantity, name in outputs
+                ]
+
+                for quantity, name in outputs:
+                    if name in recipes:
+                        raise ValueError(
+                            f"Duplicate recipe entry for item {name!r} detected"
+                        )
+                    recipe_materials = [material.copy() for material in materials]
+                    recipes[name] = Recipe(
+                        {
+                            "item": name,
+                            "method": method,
+                            "source": source_location,
+                            "cost": cost,
+                            "materials": recipe_materials,
+                            "profession": profession,
+                            "skill_tier": skill_tier,
+                            "output_quantity": quantity,
+                            "outputs": [output.copy() for output in outputs_list],
+                        }
+                    )
     except FileNotFoundError as exc:
         raise FileNotFoundError(
             f"Recipe data not found at {csv_path}. Did you download the dataset?"
@@ -205,16 +301,20 @@ def resolve_requirements(
     if method != "craft":
         raise ValueError(f"Unsupported method '{method}' for item {item!r}")
 
+    output_quantity = _get_output_quantity(recipe)
+    crafts_required = (quantity + output_quantity - 1) // output_quantity
+    produced_quantity = crafts_required * output_quantity
+
     subtotal = {
         "purchase": {},
         "raw": {},
-        "craft_cost": cost * quantity,
-        "craft": {item: quantity},
+        "craft_cost": cost * crafts_required,
+        "craft": {item: produced_quantity},
     }
 
     for material in recipe["materials"]:
         material_name = material["item"]
-        material_quantity = material["quantity"] * quantity
+        material_quantity = material["quantity"] * crafts_required
         child = resolve_requirements(
             material_name, material_quantity, recipes, stack + (item,)
         )
@@ -474,13 +574,16 @@ def build_craft_lines(
         if not recipe or recipe["method"] != "craft":
             continue
         quantity = craft_counts[craft_item]
+        output_quantity = _get_output_quantity(recipe)
+        crafts_required = (quantity + output_quantity - 1) // output_quantity
+        produced_quantity = crafts_required * output_quantity
         materials_used: list[str] = []
         for material in recipe["materials"]:
-            total_needed = material["quantity"] * quantity
+            total_needed = material["quantity"] * crafts_required
             materials_used.append(
                 format_quantity_name(total_needed, material["item"])
             )
-        fee = recipe["cost"] * quantity
+        fee = recipe["cost"] * crafts_required
         if fee:
             materials_used.append(f"{format_coin_amount(fee)} fee")
         location = get_source_location(
@@ -488,7 +591,7 @@ def build_craft_lines(
         )
         descriptions.append(
             "Craft "
-            f"{format_quantity_name(quantity, craft_item)} at {location} using "
+            f"{format_quantity_name(produced_quantity, craft_item)} at {location} using "
             f"{join_with_commas(materials_used)}"
         )
     if descriptions:

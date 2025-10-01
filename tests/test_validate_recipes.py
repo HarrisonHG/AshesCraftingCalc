@@ -46,6 +46,25 @@ def test_validate_csv_reports_multiple_errors(tmp_path: Path) -> None:
     assert "Materials must contain quantity/item pairs (missing a value?)" in line4_errors
 
 
+def test_validate_csv_accepts_multi_outputs_and_simple_materials(tmp_path: Path) -> None:
+    csv_path = tmp_path / "valid.csv"
+    csv_path.write_text(
+        textwrap.dedent(
+            """\
+            item,materials,method,source,profession,skill_tier,cost
+            2-Glass Vial-1-Bottle Stopper,3-Sand-1-Water,craft,Glassworks,Glassblower,2,15
+            Sand,,raw,Sand Pit,Gatherer,1,0
+            Water,,raw,Well,Gatherer,1,0
+            Simple Rope,Fiber,craft,Workshop,Ropemaker,1,5
+            Fiber,,raw,Fields,Gatherer,1,0
+            """
+        ),
+        encoding="utf-8",
+    )
+
+    assert validate_csv(csv_path) == []
+
+
 def test_validate_csv_missing_file(tmp_path: Path) -> None:
     with pytest.raises(ValidationError):
         validate_csv(tmp_path / "missing.csv")

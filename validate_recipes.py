@@ -36,10 +36,52 @@ class RowValidator:
     def add_error(self, message: str) -> None:
         self.errors.append(message)
 
+    def _validate_quantity_pairs(
+        self,
+        raw: str,
+        *,
+        field_label: str,
+        quantity_label: str,
+        missing_name_template: str,
+    ) -> None:
+        if "-" not in raw:
+            return
+
+        tokens = [chunk.strip() for chunk in raw.split("-") if chunk.strip()]
+        if len(tokens) < 2 or len(tokens) % 2 != 0:
+            self.add_error(
+                f"{field_label} must contain quantity/item pairs (missing a value?)"
+            )
+            return
+
+        for qty_token, name in zip(tokens[0::2], tokens[1::2]):
+            if not qty_token:
+                self.add_error(f"{quantity_label} is missing")
+                continue
+            try:
+                quantity = int(qty_token)
+            except ValueError:
+                self.add_error(
+                    f"{quantity_label} must be an integer (got {qty_token or 'blank'})"
+                )
+                continue
+            if quantity <= 0:
+                self.add_error(f"{quantity_label} must be positive (got {quantity})")
+            if not name:
+                self.add_error(missing_name_template.format(qty_token=qty_token))
+
     def validate_item(self) -> str:
         value = (self.raw_row.get("item") or "").strip()
         if not value:
             self.add_error("Item name must not be empty")
+        else:
+            raw = self.raw_row.get("item") or ""
+            self._validate_quantity_pairs(
+                raw,
+                field_label="Item column",
+                quantity_label="Item quantity",
+                missing_name_template="Item name is missing for quantity {qty_token}",
+            )
         return value
 
     def validate_method(self, item: str) -> str:
@@ -76,38 +118,19 @@ class RowValidator:
             self.add_error(f"Cost must be an integer (got {raw or 'blank'})")
 
     def validate_materials(self, item: str, method: str) -> None:
-        raw = (self.raw_row.get("materials") or "").strip()
-        if not raw:
+        raw_value = self.raw_row.get("materials") or ""
+        stripped = raw_value.strip()
+        if not stripped:
             if method == "craft":
                 self.add_error("Crafted items must list component materials")
             return
 
-        tokens = [chunk.strip() for chunk in raw.split("-") if chunk.strip()]
-        if len(tokens) % 2 != 0:
-            self.add_error(
-                "Materials must contain quantity/item pairs (missing a value?)"
-            )
-            return
-
-        for qty_token, name in zip(tokens[0::2], tokens[1::2]):
-            if not qty_token:
-                self.add_error("Material quantity is missing")
-                continue
-            try:
-                quantity = int(qty_token)
-            except ValueError:
-                self.add_error(
-                    f"Material quantity must be an integer (got {qty_token or 'blank'})"
-                )
-                continue
-            if quantity <= 0:
-                self.add_error(
-                    f"Material quantity must be positive (got {quantity})"
-                )
-            if not name:
-                self.add_error(
-                    f"Material name is missing for quantity {qty_token}"
-                )
+        self._validate_quantity_pairs(
+            raw_value,
+            field_label="Materials",
+            quantity_label="Material quantity",
+            missing_name_template="Material name is missing for quantity {qty_token}",
+        )
 
     def validate(self) -> list[str]:
         item = self.validate_item()
