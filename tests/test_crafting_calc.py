@@ -741,6 +741,73 @@ def test_load_recipes_invalid_material_quantity(tmp_path: Path):
         crafting_calc.load_recipes(csv_path)
 
 
+def test_load_recipes_parses_multiple_outputs_and_simple_materials(tmp_path: Path):
+    csv_content = textwrap.dedent(
+        """\
+        item,materials,method,source,profession,skill_tier,cost
+        2-Glass Vial-1-Bottle Stopper,3-Sand-1-Water,craft,Glassworks,Glassblower,2,15
+        Sand,,raw,Sand Pit,Gatherer,1,0
+        Water,,raw,Well,Gatherer,1,0
+        Simple Rope,Fiber,craft,Workshop,Ropemaker,1,5
+        Fiber,,raw,Fields,Gatherer,1,0
+        """
+    )
+    csv_path = tmp_path / "multi_outputs.csv"
+    csv_path.write_text(csv_content)
+
+    recipes = crafting_calc.load_recipes(csv_path)
+
+    assert {"Glass Vial", "Bottle Stopper"}.issubset(recipes)
+
+    vial_recipe = recipes["Glass Vial"]
+    assert vial_recipe["output_quantity"] == 2
+    assert vial_recipe["materials"] == [
+        {"item": "Sand", "quantity": 3},
+        {"item": "Water", "quantity": 1},
+    ]
+    assert vial_recipe["outputs"] == [
+        {"item": "Glass Vial", "quantity": 2},
+        {"item": "Bottle Stopper", "quantity": 1},
+    ]
+
+    stopper_recipe = recipes["Bottle Stopper"]
+    assert stopper_recipe["output_quantity"] == 1
+    assert stopper_recipe["materials"] == vial_recipe["materials"]
+
+    rope_recipe = recipes["Simple Rope"]
+    assert rope_recipe["materials"] == [{"item": "Fiber", "quantity": 1}]
+    assert rope_recipe["output_quantity"] == 1
+
+
+def test_resolve_requirements_handles_multiple_outputs(tmp_path: Path):
+    csv_content = textwrap.dedent(
+        """\
+        item,materials,method,source,profession,skill_tier,cost
+        2-Glass Vial-1-Bottle Stopper,3-Sand-1-Water,craft,Glassworks,Glassblower,2,15
+        Sand,,raw,Sand Pit,Gatherer,1,0
+        Water,,raw,Well,Gatherer,1,0
+        """
+    )
+    csv_path = tmp_path / "multi_output_requirements.csv"
+    csv_path.write_text(csv_content)
+
+    recipes = crafting_calc.load_recipes(csv_path)
+    requirements = crafting_calc.resolve_requirements("Glass Vial", 3, recipes)
+
+    assert requirements["craft"]["Glass Vial"] == 4
+    assert requirements["craft_cost"] == 30
+    assert requirements["raw"] == {"Sand": 6, "Water": 2}
+    assert requirements["purchase"] == {}
+    assert "Bottle Stopper" not in requirements["craft"]
+
+    lines = crafting_calc.build_craft_lines(
+        "Glass Vial", requirements["craft"], recipes
+    )
+    assert lines == [
+        "1. Craft 4 Glass Vials at Glassworks using 6 Sands, 2 Waters, and 30 copper fee"
+    ]
+
+
 def test_load_recipes_allows_missing_profession_for_non_craft(tmp_path: Path):
     csv_content = textwrap.dedent(
         """\
